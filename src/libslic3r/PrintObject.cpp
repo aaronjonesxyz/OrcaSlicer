@@ -642,6 +642,11 @@ void PrintObject::prepare_infill()
     this->process_external_surfaces();
     m_print->throw_if_canceled();
 
+    // Orca: experimental. Continue the wall loops of a narrower feature into the larger body
+    // above/below it instead of capping them with the top/bottom solid shell at the transition.
+    this->extend_walls_into_larger_body();
+    m_print->throw_if_canceled();
+
     // Debugging output.
 #ifdef SLIC3R_DEBUG_SLICE_PROCESSING
     for (size_t region_id = 0; region_id < this->num_printing_regions(); ++ region_id) {
@@ -2167,6 +2172,135 @@ void PrintObject::process_external_surfaces()
         m_print->throw_if_canceled();
         BOOST_LOG_TRIVIAL(debug) << "Processing external surfaces for region " << region_id << " in parallel - end";
     }
+}
+
+// Orca: experimental (see PrintObjectConfig::wall_extension_length). Where a narrower feature (e.g.
+// a boss or dowel) sits on top of, or below, a larger body, continue its wall loops into the larger
+// body for wall_extension_length instead of capping them with the usual top/bottom solid shell right
+// at the transition. This roots the narrow feature's walls in the larger mass, which can improve
+// strength across the joint in the Z direction.
+//
+// The transition is detected the same way detect_surfaces_type() finds a top/bottom surface: by
+// diffing a layer's per-region slices against its neighbor's. Where that diff is non-empty (a real
+// top/bottom surface exists) and the two layers also overlap (the narrow feature continues into the
+// neighbor), the overlapping area is walked into the neighbor for the configured distance, adding
+// extra concentric wall loops offset from that area's own outline (independent of wall_generator, so
+// this does not attempt to extend Arachne's variable-width perimeters) and carving the swept band out
+// of the affected layers' fill surfaces so normal infill does not overlap the new walls.
+void PrintObject::extend_walls_into_larger_body()
+{
+    const double extension_length = m_config.wall_extension_length.value;
+    if (extension_length <= 0. || m_layers.size() < 2)
+        return;
+
+    for (size_t region_id = 0; region_id < this->num_printing_regions(); ++ region_id) {
+        if (this->printing_region(region_id).config().wall_loops == 0)
+            continue;
+
+        // going_up == false: a narrower feature continues downward out of a larger body above it
+        //                     (e.g. a dowel on top of a cube) -- extend its walls down into that body.
+        // going_up == true:  a narrower feature continues upward out of a larger body below it
+        //                     (e.g. an upside-down T) -- extend its walls up into that body.
+        for (bool going_up : {false, true}) {
+            for (size_t layer_idx = 0; layer_idx < m_layers.size(); ++ layer_idx) {
+                m_print->throw_if_canceled();
+                Layer *layer    = m_layers[layer_idx];
+                Layer *neighbor = going_up ? layer->lower_layer : layer->upper_layer;
+                if (neighbor == nullptr)
+                    continue;
+
+                LayerRegion *layerm          = layer->get_region(int(region_id));
+                LayerRegion *neighbor_layerm = neighbor->get_region(int(region_id));
+                ExPolygons this_footprint     = to_expolygons(layerm->slices.surfaces);
+                ExPolygons neighbor_footprint = to_expolygons(neighbor_layerm->slices.surfaces);
+                if (this_footprint.empty() || neighbor_footprint.empty())
+                    continue;
+
+                // collapse very narrow slivers, same as detect_surfaces_type()
+                const float offset = layerm->flow(frExternalPerimeter).scaled_width() / 10.f;
+                // Real transition: this layer has area the neighbor does not cover (a genuine
+                // top/bottom surface forms here)...
+                if (opening_ex(diff_ex(this_footprint, neighbor_footprint, ApplySafetyOffset::Yes), offset).empty())
+                    continue;
+                // ...and the narrower feature continues from this layer into the neighbor.
+                ExPolygons narrow_footprint = opening_ex(intersection_ex(this_footprint, neighbor_footprint), offset);
+                if (narrow_footprint.empty())
+                    continue;
+
+                double z_extended = 0.;
+                for (int j = int(layer_idx); j >= 0 && j < int(m_layers.size()); j += (going_up ? 1 : -1)) {
+                    if (z_extended >= extension_length)
+                        break;
+                    Layer       *body_layer  = m_layers[j];
+                    LayerRegion *body_layerm = body_layer->get_region(int(region_id));
+                    ExPolygons   wall_area   = intersection_ex(narrow_footprint, to_expolygons(body_layerm->slices.surfaces));
+                    if (wall_area.empty())
+                        break;
+                    this->extend_walls_into_larger_body(body_layerm, wall_area);
+                    z_extended += body_layer->height;
+                }
+            }
+        }
+    }
+}
+
+// Add extra concentric wall loops tracing 'area' into layerm->perimeters (mirroring the region's
+// configured wall_loops count and spacing), and carve the swept band out of layerm->fill_surfaces so
+// the existing infill does not overlap the new walls.
+void PrintObject::extend_walls_into_larger_body(LayerRegion *layerm, const ExPolygons &area)
+{
+    const int wall_loops = layerm->region().config().wall_loops;
+    if (wall_loops <= 0 || area.empty())
+        return;
+
+    const Flow    perimeter_flow   = layerm->flow(frPerimeter);
+    const coord_t width            = perimeter_flow.scaled_width();
+    const coord_t spacing          = perimeter_flow.scaled_spacing();
+    const double  mm3_per_mm       = perimeter_flow.mm3_per_mm();
+    const float   extrusion_width  = perimeter_flow.width();
+    const float   extrusion_height = perimeter_flow.height();
+
+    auto add_loop = [&](const Polygon &poly, ExtrusionLoopRole role) {
+        if (poly.points.size() < 3)
+            return;
+        ExtrusionPath path(erPerimeter);
+        path.polyline   = Polyline3(poly.split_at_first_point());
+        path.mm3_per_mm = mm3_per_mm;
+        path.width      = extrusion_width;
+        path.height     = extrusion_height;
+        ExtrusionPaths paths{ std::move(path) };
+        layerm->perimeters.append(ExtrusionLoop(std::move(paths), role));
+    };
+
+    int loops_added = 0;
+    for (int i = 0; i < wall_loops; ++ i) {
+        ExPolygons loop_shape = offset_ex(area, - float(width / 2 + i * spacing));
+        if (loop_shape.empty())
+            break;
+        for (const ExPolygon &expoly : loop_shape) {
+            add_loop(expoly.contour, elrDefault);
+            for (const Polygon &hole : expoly.holes)
+                add_loop(hole, elrHole);
+        }
+        ++ loops_added;
+    }
+    if (loops_added == 0)
+        return;
+
+    // Everything from the outline in to the depth actually covered by the added loops.
+    ExPolygons inner_area = offset_ex(area, - float(width / 2 + loops_added * spacing));
+    ExPolygons swept_band = diff_ex(area, inner_area);
+    if (swept_band.empty())
+        return;
+
+    Surfaces new_surfaces;
+    new_surfaces.reserve(layerm->fill_surfaces.surfaces.size());
+    for (Surface &surface : layerm->fill_surfaces.surfaces) {
+        ExPolygons kept = diff_ex(ExPolygons{ surface.expolygon }, swept_band);
+        for (ExPolygon &e : kept)
+            new_surfaces.emplace_back(surface, std::move(e));
+    }
+    layerm->fill_surfaces.surfaces = std::move(new_surfaces);
 }
 
 void PrintObject::discover_vertical_shells()

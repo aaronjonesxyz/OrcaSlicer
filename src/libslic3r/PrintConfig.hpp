@@ -1093,6 +1093,10 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionPercent,             elefant_foot_layers_density))
     ((ConfigOptionFloat,               max_bridge_length))
     ((ConfigOptionFloatOrPercent,      line_width))
+    // Orca: experimental. Continue the wall loops of a narrower feature into the larger body
+    // above/below it (e.g. a boss/dowel rooted into a wider part) instead of capping them with
+    // the usual top/bottom solid shell right at the transition. 0 = disabled.
+    ((ConfigOptionFloat,               wall_extension_length))
     // Force the generation of solid shells between adjacent materials/volumes.
     ((ConfigOptionBool,                interface_shells))
     ((ConfigOptionFloat,               layer_height))

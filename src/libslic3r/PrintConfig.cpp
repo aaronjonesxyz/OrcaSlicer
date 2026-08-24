@@ -5527,6 +5527,19 @@ void PrintConfigDef::init_fff_params()
     def->max = 1000;
     def->set_default_value(new ConfigOptionInt(2));
     
+    def = this->add("wall_extension_length", coFloat);
+    def->label = L("Wall extension length (experimental)");
+    def->category = L("Strength");
+    def->tooltip = L("Where a narrower feature (e.g. a boss or dowel) sits on top of, or below, a larger body, "
+                     "continue its wall loops into the larger body for this distance instead of capping them "
+                     "with the usual top/bottom solid shell right at the transition. This roots the narrow "
+                     "feature's walls in the larger mass, which can improve strength across the joint in the Z "
+                     "direction. Set to 0 to disable.");
+    def->sidetext = L("mm");
+    def->min = 0;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0));
+
     def = this->add("alternate_extra_wall", coBool);
     def->label = L("Alternate extra wall");
     def->category = L("Strength");

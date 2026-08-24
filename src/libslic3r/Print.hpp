@@ -32,6 +32,7 @@ namespace Slic3r {
 
 class GCode;
 class Layer;
+class LayerRegion;
 class ModelObject;
 class Print;
 class PrintObject;
@@ -541,6 +542,9 @@ private:
     void clip_fill_surfaces();
     void discover_horizontal_shells();
     void combine_infill();
+    // Orca: experimental. See PrintObjectConfig::wall_extension_length.
+    void extend_walls_into_larger_body();
+    void extend_walls_into_larger_body(LayerRegion *layerm, const ExPolygons &area);
     void _generate_support_material();
     std::pair<FillAdaptive::OctreePtr, FillAdaptive::OctreePtr> prepare_adaptive_infill_data(
         const std::vector<std::pair<const Surface*, float>>& surfaces_w_bottom_z) const;
