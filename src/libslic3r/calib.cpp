@@ -7,6 +7,143 @@
 
 namespace Slic3r {
 
+double calibration_minimum_valid_line_width(double layer_height)
+{
+    return layer_height + EPSILON;
+}
+
+double calibration_normalized_line_width(double line_width, double layer_height)
+{
+    return line_width > 0. && line_width <= layer_height ? calibration_minimum_valid_line_width(layer_height) : line_width;
+}
+
+static bool is_auto_line_width(const ConfigOption *opt)
+{
+    return opt != nullptr && opt->type() == coFloatOrPercent &&
+           static_cast<const ConfigOptionFloatOrPercent *>(opt)->value == 0. &&
+           !static_cast<const ConfigOptionFloatOrPercent *>(opt)->percent;
+}
+
+static void set_line_width(DynamicPrintConfig &config, const std::string &key, double value)
+{
+    if (const ConfigOption *opt = config.option(key); opt != nullptr && opt->type() == coFloat)
+        config.set_key_value(key, new ConfigOptionFloat(value));
+    else
+        config.set_key_value(key, new ConfigOptionFloatOrPercent(value, false));
+}
+
+static void normalize_line_width(DynamicPrintConfig &config, const std::string &key, double layer_height)
+{
+    const ConfigOption *opt = config.option(key);
+    if (opt == nullptr || is_auto_line_width(opt))
+        return;
+
+    const double width            = config.get_abs_value(key);
+    const double normalized_width = calibration_normalized_line_width(width, layer_height);
+    if (normalized_width != width)
+        set_line_width(config, key, normalized_width);
+}
+
+static void normalize_bridge_line_width(DynamicPrintConfig &config, double layer_height)
+{
+    const ConfigOption *opt = config.option("bridge_line_width");
+    if (opt == nullptr || is_auto_line_width(opt))
+        return;
+
+    // Bridge line width is a ratio against solid infill flow unless left on auto. For calibration prints,
+    // reset invalid explicit widths to auto instead of manufacturing an arbitrary bridge ratio.
+    if (config.get_abs_value("bridge_line_width") <= layer_height)
+        config.set_key_value("bridge_line_width", new ConfigOptionFloatOrPercent(0., false));
+}
+
+void normalize_calibration_line_widths(DynamicPrintConfig &config)
+{
+    const double layer_height         = config.get_abs_value("layer_height");
+    const double initial_layer_height = config.get_abs_value("initial_layer_print_height");
+
+    for (const char *key : {
+             "line_width",
+             "outer_wall_line_width",
+             "inner_wall_line_width",
+             "sparse_infill_line_width",
+             "internal_solid_infill_line_width",
+             "top_surface_line_width",
+             "support_line_width",
+             "skin_infill_line_width",
+             "skeleton_infill_line_width",
+         })
+        normalize_line_width(config, key, layer_height);
+
+    normalize_line_width(config, "initial_layer_line_width", initial_layer_height);
+    normalize_bridge_line_width(config, layer_height);
+}
+
+void normalize_calibration_line_widths(ModelConfigObject &config, const DynamicPrintConfig &base_config)
+{
+    DynamicPrintConfig merged_config = base_config;
+    merged_config.apply(config.get(), true);
+
+    const double layer_height         = merged_config.get_abs_value("layer_height");
+    const double initial_layer_height = merged_config.get_abs_value("initial_layer_print_height");
+
+    for (const char *key : {
+             "line_width",
+             "outer_wall_line_width",
+             "inner_wall_line_width",
+             "sparse_infill_line_width",
+             "internal_solid_infill_line_width",
+             "top_surface_line_width",
+             "support_line_width",
+             "skin_infill_line_width",
+             "skeleton_infill_line_width",
+         }) {
+        const ConfigOption *opt = config.option(key);
+        if (opt == nullptr || is_auto_line_width(opt))
+            continue;
+
+        const double width            = merged_config.get_abs_value(key);
+        const double normalized_width = calibration_normalized_line_width(width, layer_height);
+        if (normalized_width != width)
+            config.set_key_value(key, new ConfigOptionFloatOrPercent(normalized_width, false));
+    }
+
+    if (const ConfigOption *opt = config.option("initial_layer_line_width"); opt != nullptr && !is_auto_line_width(opt)) {
+        const double width            = merged_config.get_abs_value("initial_layer_line_width");
+        const double normalized_width = calibration_normalized_line_width(width, initial_layer_height);
+        if (normalized_width != width)
+            config.set_key_value("initial_layer_line_width", new ConfigOptionFloatOrPercent(normalized_width, false));
+    }
+
+    if (const ConfigOption *opt = config.option("bridge_line_width"); opt != nullptr && !is_auto_line_width(opt) &&
+        merged_config.get_abs_value("bridge_line_width") <= layer_height)
+        config.set_key_value("bridge_line_width", new ConfigOptionFloatOrPercent(0., false));
+}
+
+void normalize_model_calibration_line_widths(Model &model, const DynamicPrintConfig &full_config)
+{
+    for (ModelObject *object : model.objects) {
+        normalize_calibration_line_widths(object->config, full_config);
+
+        DynamicPrintConfig object_config = full_config;
+        object_config.apply(object->config.get(), true);
+        for (ModelVolume *volume : object->volumes)
+            normalize_calibration_line_widths(volume->config, object_config);
+    }
+}
+
+void normalize_calibration_line_widths(DynamicPrintConfig &print_config, std::vector<ModelObject *> &objects)
+{
+    normalize_calibration_line_widths(print_config);
+    for (ModelObject *object : objects) {
+        normalize_calibration_line_widths(object->config, print_config);
+
+        DynamicPrintConfig object_config = print_config;
+        object_config.apply(object->config.get(), true);
+        for (ModelVolume *volume : object->volumes)
+            normalize_calibration_line_widths(volume->config, object_config);
+    }
+}
+
 // Calculate the optimal Pressure Advance speed
 float CalibPressureAdvance::find_optimal_PA_speed(const DynamicPrintConfig &config, double line_width, double layer_height, int extruder_id, int filament_idx)
 {
@@ -606,6 +743,7 @@ double CalibPressureAdvancePattern::flow_val() const
     double line_width = m_config.get_abs_value("line_width", nozzle_diameter);
     if (line_width <= 0.) line_width = Flow::auto_extrusion_width(frPerimeter, nozzle_diameter);
     double layer_height = m_config.get_abs_value("layer_height");
+    line_width = calibration_normalized_line_width(line_width, layer_height);
     double speed = speed_perimeter();
     Flow pattern_line = Flow(line_width, layer_height, nozzle_diameter);
 
@@ -806,7 +944,7 @@ double CalibPressureAdvancePattern::line_width_first_layer() const
     const double width           = m_config.get_abs_value("initial_layer_line_width", nozzle_diameter);
     if (width <= 0.)
         return Flow::auto_extrusion_width(frExternalPerimeter, nozzle_diameter);
-    return width;
+    return calibration_normalized_line_width(width, height_first_layer());
 };
 
 double CalibPressureAdvancePattern::line_width() const
@@ -816,7 +954,7 @@ double CalibPressureAdvancePattern::line_width() const
     const double width           = m_config.get_abs_value("line_width", nozzle_diameter);
     if (width <= 0.)
         return Flow::auto_extrusion_width(frExternalPerimeter, nozzle_diameter);
-    return width;
+    return calibration_normalized_line_width(width, height_layer());
 };
 
 void CalibPressureAdvancePattern::refresh_setup(const DynamicPrintConfig &config,

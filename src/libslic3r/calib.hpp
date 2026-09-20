@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 #define calib_pressure_advance_dd
 
 #include "GCodeWriter.hpp"
@@ -11,6 +12,7 @@ namespace Slic3r {
 
 class GCode;
 class Model;
+class ModelConfigObject;
 class ModelObject;
 
 enum class CalibMode : int {
@@ -57,6 +59,13 @@ struct Calib_Params
 static constexpr int vfa_layers_per_block = 25;
 static constexpr double vfa_base_block_height = 5.0;
 static constexpr double vfa_base_nozzle_diameter = 0.4;
+
+double calibration_minimum_valid_line_width(double layer_height);
+double calibration_normalized_line_width(double line_width, double layer_height);
+void normalize_calibration_line_widths(DynamicPrintConfig &config);
+void normalize_calibration_line_widths(DynamicPrintConfig &print_config, std::vector<ModelObject *> &objects);
+void normalize_calibration_line_widths(ModelConfigObject &config, const DynamicPrintConfig &base_config);
+void normalize_model_calibration_line_widths(Model &model, const DynamicPrintConfig &full_config);
 
 enum FlowRatioCalibrationType {
     COMPLETE_CALIBRATION = 0,

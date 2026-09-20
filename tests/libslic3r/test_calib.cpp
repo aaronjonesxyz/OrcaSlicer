@@ -23,6 +23,18 @@ struct PaPatternProbe : public CalibPressureAdvancePattern
 
 } // namespace
 
+TEST_CASE("Calibration line widths are normalized above layer height", "[Calib][Regression]")
+{
+    constexpr double layer_height = 0.2;
+
+    REQUIRE_THAT(calibration_normalized_line_width(0.0, layer_height), Catch::Matchers::WithinAbs(0.0, 1e-9));
+    REQUIRE_THAT(calibration_normalized_line_width(0.19, layer_height),
+                 Catch::Matchers::WithinAbs(calibration_minimum_valid_line_width(layer_height), 1e-9));
+    REQUIRE_THAT(calibration_normalized_line_width(0.2, layer_height),
+                 Catch::Matchers::WithinAbs(calibration_minimum_valid_line_width(layer_height), 1e-9));
+    REQUIRE_THAT(calibration_normalized_line_width(0.21, layer_height), Catch::Matchers::WithinAbs(0.21, 1e-9));
+}
+
 TEST_CASE("Zero calibration line width resolves to a positive default", "[Calib][Regression]")
 {
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
@@ -41,6 +53,28 @@ TEST_CASE("Zero calibration line width resolves to a positive default", "[Calib]
 
     REQUIRE(pattern.line_width() > 0.);
     REQUIRE(pattern.line_width_first_layer() > 0.);
+}
+
+TEST_CASE("PA pattern explicit line widths are normalized above layer height", "[Calib][Regression]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({
+        {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.24"},
+        {"line_width", "0.2"},
+        {"initial_layer_line_width", "0.24"},
+    });
+
+    Model model;
+    model.add_object("cube", "", make_cube(20, 20, 20))->add_instance();
+
+    Calib_Params params;
+    params.mode = CalibMode::Calib_PA_Pattern;
+
+    PaPatternProbe pattern(params, config, /* is_bbl_machine */ true, *model.objects.front(), Vec3d(0, 0, 0));
+
+    REQUIRE(pattern.line_width() > config.opt_float("layer_height"));
+    REQUIRE(pattern.line_width_first_layer() > config.opt_float("initial_layer_print_height"));
 }
 
 namespace {

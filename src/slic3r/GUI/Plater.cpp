@@ -13653,6 +13653,7 @@ void Plater::calib_pa(const Calib_Params& params)
             break;
         default: break;
     }
+    normalize_calibration_line_widths(*print_config, model().objects);
     p->background_process.fff_print()->set_calib_params(params);
 }
 
@@ -13756,6 +13757,7 @@ void Plater::_calib_pa_pattern(const Calib_Params& params)
         set_config_values<double, ConfigOptionFloatsNullable>(&print_config, "outer_wall_speed", speeds.front());
     }
 
+    normalize_calibration_line_widths(print_config, model().objects);
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
     wxGetApp().get_tab(Preset::TYPE_FILAMENT)->update_dirty();
     wxGetApp().get_tab(Preset::TYPE_PRINTER)->update_dirty();
@@ -14092,6 +14094,7 @@ void adjust_settings_for_flowrate_calib(ModelObjectPtrs& objects, bool linear, i
     print_config->set_key_value("initial_layer_print_height", new ConfigOptionFloat(first_layer_height));
     print_config->set_key_value("reduce_crossing_wall", new ConfigOptionBool(true));
     print_config->set_key_value("enable_wrapping_detection", new ConfigOptionBool(false));
+    normalize_calibration_line_widths(*print_config, objects);
 
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
     wxGetApp().get_tab(Preset::TYPE_FILAMENT)->update_dirty();
@@ -14218,6 +14221,7 @@ void Plater::calib_temp(const Calib_Params& params) {
     print_config->set_key_value("enable_wrapping_detection", new ConfigOptionBool(false));
     if (params.nozzle_based_resize)
         print_config->set_key_value("initial_layer_print_height", new ConfigOptionFloat(nozzle_diameter/2));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
 
     changed_objects({ 0 });
@@ -14283,6 +14287,7 @@ void Plater::calib_max_vol_speed(const Calib_Params& params)
     print_config->set_key_value("spiral_mode", new ConfigOptionBool(true));
     print_config->set_key_value("max_volumetric_extrusion_rate_slope", new ConfigOptionFloat(0));
     print_config->set_key_value("enable_wrapping_detection", new ConfigOptionBool(false));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
     changed_objects({ 0 });
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
@@ -14354,6 +14359,7 @@ void Plater::calib_retraction(const Calib_Params& params)
     obj->config.set_key_value("wall_sequence", new ConfigOptionEnum<WallSequence>(WallSequence::InnerOuter));
     obj->config.set_key_value("overhang_reverse", new ConfigOptionBool(false));
     obj->config.set_key_value("precise_z_height", new ConfigOptionBool(false));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
 
     changed_objects({ 0 });
@@ -14437,6 +14443,7 @@ void Plater::calib_VFA(const Calib_Params& params)
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
     model().objects[0]->config.set_key_value("brim_object_gap", new ConfigOptionFloat(0.0));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
     changed_objects({ 0 });
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
@@ -14507,6 +14514,7 @@ void Plater::calib_input_shaping_freq(const Calib_Params& params)
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
     model().objects[0]->config.set_key_value("brim_object_gap", new ConfigOptionFloat(0.0));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
     changed_objects({ 0 });
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
@@ -14572,6 +14580,7 @@ void Plater::calib_input_shaping_damp(const Calib_Params& params)
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
     model().objects[0]->config.set_key_value("brim_object_gap", new ConfigOptionFloat(0.0));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
     changed_objects({ 0 });
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
@@ -14641,6 +14650,7 @@ void Plater::Calib_Cornering(const Calib_Params& params)
     model().objects[0]->config.set_key_value("brim_type", new ConfigOptionEnum<BrimType>(btOuterOnly));
     model().objects[0]->config.set_key_value("brim_width", new ConfigOptionFloat(3.0));
     model().objects[0]->config.set_key_value("brim_object_gap", new ConfigOptionFloat(0.0));
+    normalize_calibration_line_widths(*print_config, model().objects);
 
     changed_objects({ 0 });
     wxGetApp().get_tab(Preset::TYPE_PRINT)->update_dirty();
